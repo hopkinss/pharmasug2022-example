@@ -1,11 +1,17 @@
-﻿*------------------------------------------------------------------------*
+﻿
+*------------------------------------------------------------------------*
+| Translate the contents of a dataset from Simplified Chinese to English
+*------------------------------------------------------------------------*;
+
+*------------------------------------------------------------------------*
 | Orgization-specific URL if containerized API used
 | Azure subscription key
 | Azure region
 *------------------------------------------------------------------------*;
-%let api=[your API endpoint];
+%let api=[your API root];
 %let key=[your subscription key];
 %let region=[your Azure region e.g. westus2];
+
 
 *------------------------------------------------------------------------*
 | Generate a sample dataset with both numeric and character values in 
@@ -27,7 +33,9 @@ data cm;
   ;
 run;
 
-%macro translate(dsn=);
+%macro translate( dsn=
+                 ,from_lang=
+                 ,to_lang=);
 
   %*---------------------------------------------------------------------*
   | Add a unique identifier ID to the input dataset. Used to join numeric 
@@ -52,16 +60,15 @@ run;
   | Capture metadata for character and numeric variables in macro variables
   *----------------------------------------------------------------------*;
   data _null_;
-    length cvars nvars len_cvars $5000 ;
-    retain cvars nvars len_cvars;
+    length cvars nvars $5000 ;
+    retain cvars nvars;
     set &dsn._md end=eof;
     by descending type  name;
     %*-------------------------------------------------------------------*
-    | Build a list of character variable and their lengths
+    | Build a list of character variables
     *--------------------------------------------------------------------*;
     if type=2 then do;
       cvars = catx(" ",strip(cvars),strip(name));
-      len_cvars=catx(" ",strip(len_cvars),strip(put(length,8.)));
       ncvars+1;
     end;
     %*-------------------------------------------------------------------*
@@ -75,7 +82,6 @@ run;
     if eof then do;
       call symputx("cvars",cvars);
       call symputx("nvars",nvars);
-      call symputx("len_cvars",len_cvars);
       call symputx("ncvars",ncvars);
       call symputx("nnvars",nnvars);
     end;
@@ -112,7 +118,7 @@ run;
   | file.
   *----------------------------------------------------------------------*;
  
-  proc http url="&api%nrstr(?api-version=3.0&from=zh-Hans&to=en)"
+  proc http url="&api/translate?api-version=3.0%nrstr(&from)=&from_lang%nrstr(&to)=&to_lang"
     METHOD="POST"
     AUTH_NEGOTIATE
     in=jbody
@@ -146,6 +152,14 @@ run;
     by id;
     var text;
   run;
+  %*---------------------------------------------------------------------*
+  | Find new maximum lengths of the character variables to avoid truncation
+  *----------------------------------------------------------------------*;
+  proc sql noprint;
+    select max(klength(text)) into :len_cvars separated by ' '
+    from &dsn._trn
+    group by counter;
+  quit;
 
   %*---------------------------------------------------------------------*
   | Recreate the original character variables and lenths and assign the 
@@ -167,5 +181,7 @@ run;
   run;
 %mend translate;
 
-%translate(dsn=cm);
+%translate( dsn=cm
+           ,from_lang=zh-Hans
+           ,to_lang=en);
    
