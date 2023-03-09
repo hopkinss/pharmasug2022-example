@@ -1,6 +1,8 @@
 ﻿
 *------------------------------------------------------------------------*
-| Translate the contents of a dataset from Simplified Chinese to English
+| Purpose: Translate the contents of a dataset from Simplified Chinese to English
+| Author:  Shawn Hopkins 
+| Email:   shopkins@seagen.com
 *------------------------------------------------------------------------*;
 
 *------------------------------------------------------------------------*
@@ -44,21 +46,31 @@ run;
   data &dsn._in;
     set &dsn.;
     id+1;
-  run;
+  run; 
 
   %*---------------------------------------------------------------------*
   | Sort character variables first by name. Used to rename response data 
   | from translation API
   *----------------------------------------------------------------------*;
-  proc contents data=&dsn. out=&dsn._md(keep=name type length) nodetails noprint;
+  proc contents data=&dsn. out=&dsn._md(keep=name type length varnum) nodetails noprint;
   run;
-  proc sort data=&dsn._md;
-    by descending type  name;
-  run;
+  %*---------------------------------------------------------------------*
+  | Create mvar with all variables in sequence to maintain the original 
+  | order of the variables within the dataset
+  *----------------------------------------------------------------------*;
+  proc sql noprint;
+    select name into :original_order separated by ' '
+    from &dsn._md
+    order by varnum;
+  quit;
 
   %*---------------------------------------------------------------------*
   | Capture metadata for character and numeric variables in macro variables
   *----------------------------------------------------------------------*;
+  proc sort data=&dsn._md;
+    by descending type  name;
+  run;
+
   data _null_;
     length cvars nvars $5000 ;
     retain cvars nvars;
@@ -68,7 +80,7 @@ run;
     | Build a list of character variables
     *--------------------------------------------------------------------*;
     if type=2 then do;
-      cvars = catx(" ",strip(cvars),strip(name));
+      cvars = catx(" ",cvars,name);
       ncvars+1;
     end;
     %*-------------------------------------------------------------------*
@@ -76,7 +88,7 @@ run;
     | dataset
     *--------------------------------------------------------------------*;
     else do;
-      nvars = catx(" ",strip(nvars),strip(name));
+      nvars = catx(" ",nvars, name);
       nnvars+1;
     end;
     if eof then do;
@@ -103,7 +115,7 @@ run;
     call missing(line);
     do i = 1 to dim(_v);  
       if ^missing(_v[i]) then do;   
-        _line = catx(",",strip(_line), "{'text':"||catx(strip(_v[i]),"'","'}"));
+        _line = catx(",",_line, "{'text':"||catx(_v[i],"'","'}"));
       end;
     end;
     put _line;
@@ -162,14 +174,17 @@ run;
   quit;
 
   %*---------------------------------------------------------------------*
-  | Recreate the original character variables and lenths and assign the 
-  | translated values. Merge with the original data with numeric values 
+  | Recreate the original character variables in order and reassign new
+  | length from the translated values.
+  | Merge with the original data with numeric values 
   | by unique ID 
   *----------------------------------------------------------------------*;
   data &dsn._new(drop=_var: id i);
+    retain &original_order.;
     %do i = 1 %to &ncvars.;
       length %scan(&cvars,&i,%str( )) $%scan(&len_cvars.,&i.%str( ));
     %end;
+
     merge &dsn._trn_t
           &dsn._in(keep=id &nvars.);
     by id;
